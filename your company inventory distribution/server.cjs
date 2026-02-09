@@ -299,6 +299,12 @@ app.get("/api/distributions", authenticate, async (req, res) => {
 // START SERVER
 // =======================
 
-app.listen(PORT, () => {
-  console.log("🚀 Backend running on http://localhost:" + PORT);
-});
+// Export the app for Vercel Serverless
+module.exports = app;
+
+// Only listen if run directly (not imported as a module)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log("🚀 Backend running on http://localhost:" + PORT);
+  });
+}

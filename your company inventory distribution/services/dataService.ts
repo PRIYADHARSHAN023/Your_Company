@@ -1,6 +1,7 @@
 import { Company, User, Product, Worker, Distribution } from '../types';
 
-const API_BASE = 'http://localhost:5000/api';
+// Detect environment: Vercel/Production uses relative path, Local uses port 5000
+const API_BASE = (import.meta as any).env.PROD ? '/api' : 'http://localhost:5000/api';
 
 class DataService {
 

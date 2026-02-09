@@ -1,4 +1,4 @@
 
-const app = require("../server.cjs");
+import app from '../server.cjs';
 
-module.exports = app;
+export default app;

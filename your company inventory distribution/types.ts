@@ -42,6 +42,8 @@ export interface Distribution {
   productId: string;
   productName: string;
   quantity: number;
+  pricePerUnit?: number;
+  totalAmount?: number;
   distributedBy: string; // User Name
   distributedAt: string;
 }

@@ -1,59 +1,115 @@
-
 import { Company, User, Product, Worker, Distribution } from '../types';
 
+const API_BASE = 'http://localhost:5000/api';
+
 class DataService {
-  private get(key: string): any[] {
-    return JSON.parse(localStorage.getItem(`yc_db_${key}`) || '[]');
+
+  private getToken(): string | null {
+    return localStorage.getItem('yc_token');
   }
 
-  private save(key: string, data: any): void {
-    localStorage.setItem(`yc_db_${key}`, JSON.stringify(data));
-  }
-
-  // Improved unique ID generator to prevent collisions during rapid operations
-  private generateId(prefix: string): string {
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-  }
-
-  async setupCompany(name: string): Promise<Company> {
-    const company = { id: this.generateId('ent'), name, createdAt: new Date().toISOString() };
-    localStorage.setItem('yc_company_data', JSON.stringify(company));
-    return company;
-  }
-
-  async getCompany(): Promise<Company | null> {
-    const data = localStorage.getItem('yc_company_data');
+  private getCachedCompany(): any {
+    const data = localStorage.getItem('yc_company');
     return data ? JSON.parse(data) : null;
   }
 
-  async registerUser(user: any): Promise<void> {
-    const users = this.get('users');
-    const newUser = { 
-      ...user, 
-      id: this.generateId('u'), 
-      createdAt: new Date().toISOString() 
+  private async request(method: string, endpoint: string, body?: any) {
+
+    const headers: any = {
+      'Content-Type': 'application/json'
     };
-    users.push(newUser);
-    this.save('users', users);
+
+    const token = this.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
   }
 
-  async login(userId: string, password?: string): Promise<User | null> {
-    const users = this.get('users');
-    const user = users.find((u: any) => u.userId === userId);
-    
-    if (!user) return null;
-    
-    const sessionUser = { ...user };
-    delete sessionUser.password;
-    
-    localStorage.setItem('yc_token', 'local-session-token');
-    localStorage.setItem('yc_session_user', JSON.stringify(sessionUser));
-    return sessionUser;
+  // COMPANY
+  async getCompany(): Promise<Company | null> {
+    try {
+      const cached = this.getCachedCompany();
+      if (cached) return cached;
+
+      const company = await this.request('GET', '/company');
+      const normalized = { ...company, id: company._id || company.id };
+
+      localStorage.setItem('yc_company', JSON.stringify(normalized));
+      return normalized;
+
+    } catch {
+      return null;
+    }
+  }
+
+  async setupCompany(name: string): Promise<Company> {
+    const company = await this.request('POST', '/company/setup', { name });
+    const normalized = { ...company, id: company._id || company.id };
+
+    localStorage.setItem('yc_company', JSON.stringify(normalized));
+    return normalized;
+  }
+
+  async checkCompany(name: string): Promise<Company | null> {
+    try {
+      const company = await this.request('POST', '/company/check', { name });
+      const normalized = { ...company, id: company._id || company.id };
+
+      // Persist for Registration flow
+      localStorage.setItem('yc_company', JSON.stringify(normalized));
+
+      return normalized;
+    } catch {
+      return null;
+    }
+  }
+
+  // AUTH
+  async registerUser(user: any): Promise<void> {
+    await this.request('POST', '/auth/register', user);
+  }
+
+  async login(companyName: string, userId: string, password: string): Promise<User | null> {
+
+    try {
+      const response = await this.request('POST', '/auth/login', {
+        companyName,
+        userId,
+        password
+      });
+
+      localStorage.setItem('yc_token', response.token);
+      localStorage.setItem('yc_session_user', JSON.stringify(response.user));
+      if (response.company) {
+        localStorage.setItem('yc_company', JSON.stringify(response.company));
+      }
+
+      return response.user;
+
+    } catch {
+      return null;
+    }
   }
 
   logout(): void {
     localStorage.removeItem('yc_token');
     localStorage.removeItem('yc_session_user');
+    localStorage.removeItem('yc_company');
+    // We clear everything to be safe, or just specific keys. 
+    // Ensuring company is gone is critical for the "Switch Company" feature.
   }
 
   getCurrentUser(): User | null {
@@ -61,94 +117,72 @@ class DataService {
     return data ? JSON.parse(data) : null;
   }
 
+  // PRODUCTS
   async getProducts(): Promise<Product[]> {
-    return this.get('products');
+    const products = await this.request('GET', '/products');
+    return products.map((p: any) => ({ ...p, id: p._id }));
   }
 
   async addOrUpdateProduct(product: any): Promise<Product> {
-    let products = this.get('products');
-    // Ensure case-insensitive check for existing products
-    const idx = products.findIndex((p: any) => p.productName.trim().toLowerCase() === product.productName.trim().toLowerCase());
-    
-    let result: any;
-    if (idx > -1) {
-      // Update existing
-      products[idx].totalStock += product.totalStock;
-      products[idx].updatedAt = new Date().toISOString();
-      // Ensure category is updated if changed
-      products[idx].category = product.category || products[idx].category;
-      result = products[idx];
-    } else {
-      // Create new with guaranteed unique ID
-      result = { 
-        ...product, 
-        id: this.generateId('p'), 
-        updatedAt: new Date().toISOString() 
-      };
-      products.push(result);
-    }
-    
-    this.save('products', products);
-    return result;
+    const result = await this.request('POST', '/products', product);
+    return { ...result, id: result._id };
   }
 
-  async bulkAddProducts(items: any[]): Promise<void> {
-    for (const item of items) {
-      await this.addOrUpdateProduct(item);
+  async bulkAddProducts(products: any[]): Promise<void> {
+    for (const product of products) {
+      await this.addOrUpdateProduct(product);
     }
   }
 
+  // WORKERS
   async getWorkers(): Promise<Worker[]> {
-    return this.get('workers');
+    const workers = await this.request('GET', '/workers');
+    return workers.map((w: any) => ({ ...w, id: w._id }));
   }
 
   async addWorker(worker: any): Promise<Worker> {
-    let workers = this.get('workers');
-    const newWorker = { ...worker, id: this.generateId('w') };
-    workers.push(newWorker);
-    this.save('workers', workers);
-    return newWorker;
+    const result = await this.request('POST', '/workers', worker);
+    return { ...result, id: result._id };
   }
 
+  // DISTRIBUTIONS
   async getDistributions(): Promise<Distribution[]> {
-    return this.get('distributions');
+
+    const distributions = await this.request('GET', '/distributions');
+
+    return distributions.map((d: any) => ({
+      id: d._id,
+      workerId: d.workerId,
+      productId: d.productId,
+      quantity: d.quantity,
+      distributedBy: d.distributedBy,
+      distributedAt: d.distributedAt,
+      workerName: d.workerName,
+      productName: d.productName,
+      pricePerUnit: d.pricePerUnit,
+      totalAmount: d.totalAmount
+    }));
   }
 
-  async createBatchDistribution(worker: Worker, items: { productId: string; quantity: number }[]): Promise<string> {
-    let products = this.get('products');
-    let distributions = this.get('distributions');
-    const currentUser = this.getCurrentUser();
+  async createBatchDistribution(worker: Worker, items: any[]): Promise<string> {
 
-    // Verification Layer: Ensure all IDs are valid and quantities are available
-    for (const item of items) {
-      const prod = products.find((p: any) => p.id === item.productId);
-      if (!prod) return `Product identity error for ID: ${item.productId}`;
-      if (prod.totalStock < item.quantity) {
-        return `Insufficient stock for ${prod.productName}. Requested: ${item.quantity}, Available: ${prod.totalStock}`;
+    try {
+      for (const item of items) {
+        await this.request('POST', '/distributions', {
+          workerId: worker.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          pricePerUnit: item.pricePerUnit
+        });
       }
-    }
 
-    // Execution Layer: Update inventory and log distributions
-    for (const item of items) {
-      const pIdx = products.findIndex((p: any) => p.id === item.productId);
-      products[pIdx].totalStock -= item.quantity;
-      
-      distributions.push({
-        id: this.generateId('dist'),
-        workerId: worker.id,
-        workerName: worker.name,
-        productId: item.productId,
-        productName: products[pIdx].productName,
-        quantity: item.quantity,
-        distributedBy: currentUser?.name || 'System Administrator',
-        distributedAt: new Date().toISOString()
-      });
-    }
+      return "success";
 
-    this.save('products', products);
-    this.save('distributions', distributions);
-    return "success";
+    } catch (err: any) {
+      return err.message || "Failed";
+    }
   }
 }
 
+/* 🔥 IMPORTANT FIX */
 export const dataService = new DataService();

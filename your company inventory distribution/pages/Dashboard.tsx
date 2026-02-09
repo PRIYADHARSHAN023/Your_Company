@@ -35,22 +35,42 @@ export const DashboardPage = () => {
   }, []);
 
   const stats = useMemo(() => {
+    const user = dataService.getCurrentUser();
+    const isWorker = user?.role === 'Worker';
+
+    // Global Stats
     const outOfStock = products.filter(p => p.totalStock === 0);
+    const totalStock = products.length; // Workers can see total items
+
+    // User-Specific or Global Distribution Stats
+    // If worker, we only count THEIR distributions for the "Total Distributions" card
+    // BUT user said "leader board la yaaru irukka" -> Leaderboard needs GLOBAL data.
+    // So we need two sets of data:
+    // 1. globalDists (for leaderboard / top products)
+    // 2. myDists (for "My Stats" cards if we want to differentiate)
+
+    // User Requirement: "worker login ... avaru evlo products eduthurukkaru" (How much HE took)
+    // So distinct metrics:
+    const myDists = isWorker ? dists.filter(d => d.workerName === user.name) : dists;
+
     const prodMap: Record<string, number> = {};
+    // Leaderboard needs GLOBAL data
     dists.forEach(d => { prodMap[d.productName] = (prodMap[d.productName] || 0) + d.quantity; });
     const topProducts = Object.entries(prodMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 5);
+
     const workerMap: Record<string, number> = {};
-    dists.forEach(d => { workerMap[d.workerName] = (workerMap[d.workerName] || 0) + 1; });
+    dists.forEach(d => { workerMap[d.workerName] = (workerMap[d.workerName] || 0) + d.quantity; }); // Changed to quantity for better leaderboard
     const workerStats = Object.entries(workerMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
 
-    return { 
-      outOfStock: outOfStock.length, 
+    return {
+      outOfStock: outOfStock.length,
       outOfStockList: outOfStock,
-      topProducts, 
-      workerStats, 
-      totalProducts: products.length, 
-      totalDist: dists.length,
-      activeWorkers: workers.length
+      topProducts,
+      workerStats,
+      totalProducts: totalStock,
+      totalDist: myDists.length, // Show MY total if worker
+      activeWorkers: workers.length,
+      isWorker
     };
   }, [products, dists, workers]);
 
@@ -65,7 +85,7 @@ export const DashboardPage = () => {
     <div className="space-y-8 pb-12">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard icon={<Package className="text-indigo-600" />} label="Total Stock" value={stats.totalProducts} color="bg-indigo-50" active={activeMetric === 'inventory'} onClick={() => setActiveMetric(activeMetric === 'inventory' ? null : 'inventory')} />
-        <MetricCard icon={<Truck className="text-emerald-600" />} label="Total Distributions" value={stats.totalDist} color="bg-emerald-50" active={activeMetric === 'dist'} onClick={() => setActiveMetric(activeMetric === 'dist' ? null : 'dist')} />
+        <MetricCard icon={<Truck className="text-emerald-600" />} label={stats.isWorker ? "My Contributions" : "Total Distributions"} value={stats.totalDist} color="bg-emerald-50" active={activeMetric === 'dist'} onClick={() => setActiveMetric(activeMetric === 'dist' ? null : 'dist')} />
         <MetricCard icon={<AlertTriangle className="text-rose-600" />} label="Critical Levels" value={stats.outOfStock} color="bg-rose-50" active={activeMetric === 'stockout'} onClick={() => setActiveMetric(activeMetric === 'stockout' ? null : 'stockout')} />
         <MetricCard icon={<TrendingUp className="text-amber-600" />} label="Active Personnel" value={stats.activeWorkers} color="bg-amber-50" active={activeMetric === 'workers'} onClick={() => setActiveMetric(activeMetric === 'workers' ? null : 'workers')} />
       </div>
@@ -93,12 +113,12 @@ export const DashboardPage = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <ChartBox title="Distribution Trends" icon={<Package className="text-indigo-400"/>}>
+        <ChartBox title="Distribution Trends" icon={<Package className="text-indigo-400" />}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={stats.topProducts}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
-              <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
+              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
               <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
               <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={40}>
                 {stats.topProducts.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
@@ -107,7 +127,7 @@ export const DashboardPage = () => {
           </ResponsiveContainer>
         </ChartBox>
 
-        <ChartBox title="Personnel Activity" icon={<TrendingUp className="text-amber-400"/>}>
+        <ChartBox title="Personnel Activity" icon={<TrendingUp className="text-amber-400" />}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={stats.workerStats} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={8}>

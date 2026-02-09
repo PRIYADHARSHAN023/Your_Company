@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { UserPlus, Users, Search, PackageCheck, CheckCircle2, ChevronRight, Plus, Minus, Trash2, ListChecks, Hash, UserCheck, XCircle, LayoutDashboard, FileBarChart, Loader2 } from 'lucide-react';
 import { dataService } from '../services/dataService';
@@ -11,9 +10,10 @@ export const DistributionPage = () => {
   const [sessionMode, setSessionMode] = useState<'single' | 'batch' | null>(null);
   const [batchCount, setBatchCount] = useState<number>(0);
   const [processedCount, setProcessedCount] = useState<number>(0);
-  
+
   const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
-  const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
+  const [cart, setCart] = useState<{ product: Product; quantity: number; pricePerUnit: number }[]>([]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [workerForm, setWorkerForm] = useState({ name: '', mobile: '', gender: 'Male' as any });
 
@@ -28,8 +28,11 @@ export const DistributionPage = () => {
           dataService.getWorkers(),
           dataService.getProducts()
         ]);
-        setWorkers(workerData);
-        setProducts(productData);
+        setWorkers(workerData || []);
+        setProducts(productData || []);
+      } catch (err) {
+        console.error("Failed to fetch data:", err);
+        alert("Failed to load inventory data. Please refresh.");
       } finally {
         setLoading(false);
       }
@@ -37,7 +40,7 @@ export const DistributionPage = () => {
     fetchData();
   }, [step]);
 
-  const filteredProducts = useMemo(() => 
+  const filteredProducts = useMemo(() =>
     products.filter(p => p.productName.toLowerCase().includes(searchTerm.toLowerCase())),
     [products, searchTerm]
   );
@@ -75,18 +78,13 @@ export const DistributionPage = () => {
 
   const addToCart = (p: Product) => {
     if (p.totalStock <= 0) return;
-    
+
     setCart(prevCart => {
       const existingItemIndex = prevCart.findIndex(item => item.product.id === p.id);
       if (existingItemIndex > -1) {
-        const updatedCart = [...prevCart];
-        const item = updatedCart[existingItemIndex];
-        if (item.quantity < item.product.totalStock) {
-          updatedCart[existingItemIndex] = { ...item, quantity: item.quantity + 1 };
-        }
-        return updatedCart;
+        return prevCart; // Already matches logic below
       } else {
-        return [...prevCart, { product: p, quantity: 1 }];
+        return [...prevCart, { product: p, quantity: 1, pricePerUnit: 0 }];
       }
     });
   };
@@ -101,6 +99,15 @@ export const DistributionPage = () => {
     }));
   };
 
+  const updateCartPrice = (id: string, price: number) => {
+    setCart(prevCart => prevCart.map(item => {
+      if (item.product.id === id) {
+        return { ...item, pricePerUnit: price };
+      }
+      return item;
+    }));
+  };
+
   const removeFromCart = (id: string) => {
     setCart(prevCart => prevCart.filter(item => item.product.id !== id));
   };
@@ -108,8 +115,12 @@ export const DistributionPage = () => {
   const handleFinishDistribution = async () => {
     if (selectedWorker && cart.length > 0) {
       const res = await dataService.createBatchDistribution(
-        selectedWorker, 
-        cart.map(c => ({ productId: c.product.id, quantity: c.quantity }))
+        selectedWorker,
+        cart.map(c => ({
+          productId: c.product.id,
+          quantity: c.quantity,
+          pricePerUnit: c.pricePerUnit
+        }))
       );
       if (res === "success") {
         setStep(4);
@@ -148,8 +159,8 @@ export const DistributionPage = () => {
             )}
           </div>
           {step < 4 && sessionMode && (
-            <button 
-              onClick={() => { if(confirm("End current distribution session?")) { resetLocalState(); } }}
+            <button
+              onClick={() => { if (confirm("End current distribution session?")) { resetLocalState(); } }}
               className="flex items-center gap-2 px-6 py-3 border-2 border-slate-200 rounded-2xl font-black text-slate-400 hover:text-rose-500 hover:border-rose-100 transition-all text-sm"
             >
               <XCircle size={18} />
@@ -162,10 +173,10 @@ export const DistributionPage = () => {
           <div className="absolute top-7 left-20 right-20 h-1 bg-slate-100 -z-10 rounded-full overflow-hidden">
             <div className="h-full bg-indigo-600 transition-all duration-700" style={{ width: `${((step - 1) / 3) * 100}%` }} />
           </div>
-          <StepNode active={step >= 1} current={step === 1} label="Identity" icon={<Users size={20}/>} step={1} />
-          <StepNode active={step >= 2} current={step === 2} label="Selection" icon={<PackageCheck size={20}/>} step={2} />
-          <StepNode active={step >= 3} current={step === 3} label="Audit" icon={<ListChecks size={20}/>} step={3} />
-          <StepNode active={step >= 4} current={step === 4} label="Success" icon={<CheckCircle2 size={20}/>} step={4} />
+          <StepNode active={step >= 1} current={step === 1} label="Identity" icon={<Users size={20} />} step={1} />
+          <StepNode active={step >= 2} current={step === 2} label="Selection" icon={<PackageCheck size={20} />} step={2} />
+          <StepNode active={step >= 3} current={step === 3} label="Audit" icon={<ListChecks size={20} />} step={3} />
+          <StepNode active={step >= 4} current={step === 4} label="Success" icon={<CheckCircle2 size={20} />} step={4} />
         </div>
       </div>
 
@@ -173,13 +184,13 @@ export const DistributionPage = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto mt-12 animate-in fade-in zoom-in duration-300">
           <SessionCard title="Standard Entry" desc="Process distributions for workers one by one." icon={<UserCheck size={40} />} onClick={() => setSessionMode('single')} />
           <SessionCard title="Batch Entry" desc="Sequential loop for rapid worker registration." icon={<Hash size={40} />} onClick={() => {
-              const countInput = prompt("Enter number of workers for this batch:", "5");
-              const count = parseInt(countInput || "0");
-              if (count > 0) {
-                setBatchCount(count);
-                setSessionMode('batch');
-              }
-            }}
+            const countInput = prompt("Enter number of workers for this batch:", "5");
+            const count = parseInt(countInput || "0");
+            if (count > 0) {
+              setBatchCount(count);
+              setSessionMode('batch');
+            }
+          }}
           />
         </div>
       ) : (
@@ -214,13 +225,13 @@ export const DistributionPage = () => {
                   <UserPlus className="text-indigo-400" /> Enrollment
                 </h3>
                 <form onSubmit={handleCreateWorker} className="space-y-6 relative z-10">
-                  <Input label="Worker Name" value={workerForm.name} onChange={v => setWorkerForm({...workerForm, name: v})} required dark placeholder="Enter full name..." />
-                  <Input label="Mobile (Optional)" value={workerForm.mobile} onChange={v => setWorkerForm({...workerForm, mobile: v})} dark placeholder="e.g. 555-0101" />
+                  <Input label="Worker Name" value={workerForm.name} onChange={v => setWorkerForm({ ...workerForm, name: v })} required dark placeholder="Enter full name..." />
+                  <Input label="Mobile (Optional)" value={workerForm.mobile} onChange={v => setWorkerForm({ ...workerForm, mobile: v })} dark placeholder="e.g. 555-0101" />
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Gender</label>
                     <div className="grid grid-cols-3 gap-4">
                       {['Male', 'Female', 'Other'].map(g => (
-                        <button key={g} type="button" onClick={() => setWorkerForm({...workerForm, gender: g as any})} className={`py-4 rounded-2xl font-black transition-all ${workerForm.gender === g ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                        <button key={g} type="button" onClick={() => setWorkerForm({ ...workerForm, gender: g as any })} className={`py-4 rounded-2xl font-black transition-all ${workerForm.gender === g ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                           {g}
                         </button>
                       ))}
@@ -245,7 +256,7 @@ export const DistributionPage = () => {
                     </div>
                     <div className="relative w-full md:w-80">
                       <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input 
+                      <input
                         type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                         className="w-full pl-14 pr-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-slate-900 focus:ring-4 focus:ring-indigo-500/10 outline-none"
                         placeholder="Search inventory..."
@@ -310,14 +321,29 @@ export const DistributionPage = () => {
                             </button>
                           </div>
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center bg-white/10 rounded-2xl p-1.5 border border-white/5 shadow-inner">
-                              <button onClick={() => updateCartQty(item.product.id, -1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-xl transition-all"><Minus size={14}/></button>
-                              <span className="w-12 text-center font-black text-xl text-white">{item.quantity}</span>
-                              <button onClick={() => updateCartQty(item.product.id, 1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-xl transition-all"><Plus size={14}/></button>
+                            <div className="flex items-center gap-4">
+                              <div className="flex items-center bg-white/10 rounded-2xl p-1.5 border border-white/5 shadow-inner">
+                                <button onClick={() => updateCartQty(item.product.id, -1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-xl transition-all"><Minus size={14} /></button>
+                                <span className="w-12 text-center font-black text-xl text-white">{item.quantity}</span>
+                                <button onClick={() => updateCartQty(item.product.id, 1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-xl transition-all"><Plus size={14} /></button>
+                              </div>
+                              <div className="flex flex-col">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Price/Unit</label>
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-black">₹</span>
+                                  <input
+                                    type="number"
+                                    value={item.pricePerUnit || ''}
+                                    onChange={(e) => updateCartPrice(item.product.id, parseFloat(e.target.value))}
+                                    className="w-24 bg-white/5 border border-white/10 rounded-xl py-2 pl-6 pr-2 text-white font-bold text-sm outline-none focus:bg-white/10 transition-all"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                              </div>
                             </div>
                             <div className="text-right">
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Balance</p>
-                              <p className="font-black text-slate-300">{item.product.totalStock - item.quantity}</p>
+                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total</p>
+                              <p className="font-black text-emerald-400 text-lg">₹{(item.quantity * (item.pricePerUnit || 0)).toFixed(2)}</p>
                             </div>
                           </div>
                         </div>
@@ -349,9 +375,16 @@ export const DistributionPage = () => {
                       <div>
                         <p className="font-black text-slate-800 text-lg">{item.product.productName}</p>
                         <p className="text-xs text-slate-400 font-black uppercase tracking-widest">{item.product.category}</p>
+                        <div className="flex items-center gap-3 mt-2">
+                          <span className="px-2 py-1 bg-slate-100 rounded-lg text-xs font-bold text-slate-500">Qty: {item.quantity}</span>
+                          <span className="px-2 py-1 bg-slate-100 rounded-lg text-xs font-bold text-slate-500">@ ₹{item.pricePerUnit || 0}</span>
+                        </div>
                       </div>
-                      <div className="text-3xl font-black text-indigo-600 bg-indigo-50 w-16 h-16 flex items-center justify-center rounded-2xl">
-                        {item.quantity}
+                      <div className="text-right">
+                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-1">Amount</span>
+                        <div className="text-2xl font-black text-indigo-600">
+                          ₹{(item.quantity * (item.pricePerUnit || 0)).toFixed(2)}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -409,10 +442,9 @@ const Input = ({ label, value, onChange, required, dark, type = "text", placehol
     <input
       type={type} required={required} value={value}
       onChange={e => onChange(e.target.value)}
-      className={`w-full px-6 py-5 rounded-[1.5rem] outline-none font-bold transition-all text-lg ${
-        dark ? 'bg-white/5 border border-white/10 focus:bg-white/10 focus:ring-4 focus:ring-indigo-500/20 text-white placeholder-slate-600' 
-             : 'bg-slate-50 border border-slate-100 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 text-slate-900 placeholder-slate-300'
-      }`}
+      className={`w-full px-6 py-5 rounded-[1.5rem] outline-none font-bold transition-all text-lg ${dark ? 'bg-white/5 border border-white/10 focus:bg-white/10 focus:ring-4 focus:ring-indigo-500/20 text-white placeholder-slate-600'
+        : 'bg-slate-50 border border-slate-100 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 text-slate-900 placeholder-slate-300'
+        }`}
       placeholder={placeholder}
     />
   </div>

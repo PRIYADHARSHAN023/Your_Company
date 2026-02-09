@@ -58,37 +58,93 @@ export const StockEntryPage = () => {
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws);
+
+        // Use 'header: 1' to get raw array of arrays. This gives us full control.
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+        if (!rows || rows.length === 0) throw new Error("Empty sheet");
 
         const currentCompany = await dataService.getCompany();
         if (!currentCompany) throw new Error("No company setup found");
 
-        const items = data.map((row: any) => {
-          const findKey = (patterns: string[]) => {
-            const keys = Object.keys(row);
-            return keys.find(k => patterns.some(p => k.toLowerCase().includes(p.toLowerCase())));
-          };
+        // 1. smart-scan for headers in first 5 rows
+        let headerRowIdx = -1;
+        let colMap = { name: -1, cat: -1, stock: -1 };
 
-          const nameKey = findKey(['product', 'name', 'item', 'description']);
-          const catKey = findKey(['category', 'group', 'type', 'dept']);
-          const qtyKey = findKey(['quantity', 'qty', 'count', 'stock', 'amount']);
+        for (let i = 0; i < Math.min(rows.length, 5); i++) {
+          const row = rows[i].map(c => String(c).toLowerCase().trim());
+          const nameIdx = row.findIndex(c => /product|name|item|desc|title/i.test(c));
+          const stockIdx = row.findIndex(c => /qty|quantity|stock|count|amount|total|num/i.test(c));
+          const catIdx = row.findIndex(c => /category|group|type|dept|class/i.test(c));
 
-          const productName = nameKey ? String(row[nameKey]).trim() : '';
-          const category = catKey ? String(row[catKey]).trim() : 'General';
-          const totalStock = qtyKey ? Number(row[qtyKey]) : 0;
+          // If we found at least Name or Stock, assume this is the header
+          if (nameIdx !== -1 || stockIdx !== -1) {
+            headerRowIdx = i;
+            colMap = { name: nameIdx, cat: catIdx, stock: stockIdx };
+            break;
+          }
+        }
+
+        // 2. Fallback if no headers found: Use positional defaults
+        if (headerRowIdx === -1) {
+          // Heuristic: If row 0 has text in col 1, but row 1 has number in col 1, row 0 is likely header
+          const r0 = rows[0];
+          const r1 = rows[1];
+          const col1IsNumber = r1 && !isNaN(parseFloat(r1[1]));
+          const col1IsString = r0 && isNaN(parseFloat(r0[1]));
+
+          if (col1IsString && col1IsNumber) {
+            headerRowIdx = 0; // Skip first row as it looks like a header
+          }
+
+          // Defaults: Col 0 = Name, Col 1 = Stock (if number) else Category?
+          // Let's look for the first numeric column in general for Stock
+          colMap.name = 0;
+
+          // Find first column that looks like stock numbers in the first few rows
+          const sampleData = rows.slice(headerRowIdx + 1, headerRowIdx + 6);
+          const stockColCandidate = sampleData[0]?.findIndex(c => !isNaN(parseFloat(String(c))));
+
+          if (stockColCandidate !== -1 && stockColCandidate !== 0) {
+            colMap.stock = stockColCandidate;
+            // If stock is col 2, maybe cat is col 1?
+            if (stockColCandidate === 2) colMap.cat = 1;
+          } else {
+            colMap.stock = 1; // Last resort
+          }
+        }
+
+        const items = rows.slice(headerRowIdx + 1).map((row: any[]) => {
+          // Extract using map
+          const rawName = colMap.name !== -1 ? row[colMap.name] : row[0];
+          const rawCat = colMap.cat !== -1 ? row[colMap.cat] : (colMap.stock > 1 ? row[1] : 'General');
+          const rawStock = colMap.stock !== -1 ? row[colMap.stock] : row[1];
+
+          // Clean up
+          const productName = rawName ? String(rawName).trim() : '';
+          const category = rawCat ? String(rawCat).trim() : 'General';
+
+          // Stock cleaning: handle "100 units", "$100", etc
+          let totalStock = 0;
+          if (typeof rawStock === 'number') {
+            totalStock = rawStock;
+          } else if (rawStock) {
+            const numericStr = String(rawStock).replace(/[^0-9.]/g, '');
+            totalStock = parseFloat(numericStr) || 0;
+          }
 
           return { companyId: currentCompany.id, productName, category, totalStock };
-        }).filter(i => i.productName && !isNaN(i.totalStock) && i.totalStock >= 0);
+        }).filter(i => i.productName && !isNaN(i.totalStock)); // Allow 0 stock, filter only empty names
 
         if (items.length === 0) {
-          alert("No valid data found in the Excel sheet.");
+          alert("No valid data found in the Excel sheet. Please ensure columns include Product Name and Quantity.");
           return;
         }
 
         await dataService.bulkAddProducts(items);
         const updatedProducts = await dataService.getProducts();
         setProducts(updatedProducts);
-        setUploadStats({ total: data.length, success: items.length });
+        setUploadStats({ total: rows.length - (headerRowIdx + 1), success: items.length });
         setTimeout(() => setUploadStats(null), 5000);
       } catch (err) {
         console.error(err);
@@ -101,7 +157,7 @@ export const StockEntryPage = () => {
     reader.readAsBinaryString(file);
   };
 
-  const filteredProducts = products.filter(p => 
+  const filteredProducts = products.filter(p =>
     p.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -118,16 +174,16 @@ export const StockEntryPage = () => {
         <div className="xl:col-span-4 sticky top-24">
           <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-2xl overflow-hidden relative">
             <div className="absolute top-0 right-0 w-40 h-40 bg-indigo-500/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-            
+
             {activeTab === 'manual' && (
               <form onSubmit={handleManualSubmit} className="space-y-6 relative z-10">
                 <div className="mb-8">
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight">Manual Stock Entry</h3>
                   <p className="text-slate-500 font-medium">Add or update individual product inventory.</p>
                 </div>
-                <Input label="Product Name" value={formData.productName} onChange={v => setFormData({...formData, productName: v})} required placeholder="e.g. Safety Helmets" />
-                <Input label="Category" value={formData.category} onChange={v => setFormData({...formData, category: v})} required placeholder="e.g. PPE Gear" />
-                <Input label="Quantity to Add" type="number" value={formData.totalStock} onChange={v => setFormData({...formData, totalStock: parseInt(v) || 0})} required />
+                <Input label="Product Name" value={formData.productName} onChange={v => setFormData({ ...formData, productName: v })} required placeholder="e.g. Safety Helmets" />
+                <Input label="Category" value={formData.category} onChange={v => setFormData({ ...formData, category: v })} required placeholder="e.g. PPE Gear" />
+                <Input label="Quantity to Add" type="number" value={formData.totalStock} onChange={v => setFormData({ ...formData, totalStock: parseInt(v) || 0 })} required />
                 <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black text-lg hover:bg-indigo-600 transition-all shadow-xl shadow-slate-200 transform active:scale-95 mt-4">
                   Update Inventory
                 </button>
@@ -170,9 +226,9 @@ export const StockEntryPage = () => {
                   <p className="text-slate-500 font-medium">Summary of your current stock status.</p>
                 </div>
                 <div className="grid grid-cols-1 gap-4">
-                  <StatSummaryCard label="Out of Stock" value={products.filter(p => p.totalStock === 0).length} color="text-rose-600" bg="bg-rose-50" icon={<AlertCircle size={20}/>} />
-                  <StatSummaryCard label="Low Inventory" value={products.filter(p => p.totalStock > 0 && p.totalStock < 20).length} color="text-amber-600" bg="bg-amber-50" icon={<AlertCircle size={20}/>} />
-                  <StatSummaryCard label="Healthy Stock" value={products.filter(p => p.totalStock >= 20).length} color="text-emerald-600" bg="bg-emerald-50" icon={<CheckCircle2 size={20}/>} />
+                  <StatSummaryCard label="Out of Stock" value={products.filter(p => p.totalStock === 0).length} color="text-rose-600" bg="bg-rose-50" icon={<AlertCircle size={20} />} />
+                  <StatSummaryCard label="Low Inventory" value={products.filter(p => p.totalStock > 0 && p.totalStock < 20).length} color="text-amber-600" bg="bg-amber-50" icon={<AlertCircle size={20} />} />
+                  <StatSummaryCard label="Healthy Stock" value={products.filter(p => p.totalStock >= 20).length} color="text-emerald-600" bg="bg-emerald-50" icon={<CheckCircle2 size={20} />} />
                 </div>
               </div>
             )}

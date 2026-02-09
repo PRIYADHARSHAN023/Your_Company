@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { FileText, Download, Filter, Calendar, Search, Users, Package, FileSpreadsheet, File as FileIcon, X, Loader2 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import * as XLSX from 'xlsx';
-import { jsPDF } from 'jspdf';
+import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export const ReportsPage = () => {
@@ -22,8 +22,15 @@ export const ReportsPage = () => {
 
   const filteredData = useMemo(() => {
     let data = [...distributions];
+    const user = dataService.getCurrentUser();
+
+    // If Worker, only show their own data
+    if (user && user.role === 'Worker') {
+      data = data.filter(d => d.workerName === user.name);
+    }
+
     const today = new Date();
-    today.setHours(0,0,0,0);
+    today.setHours(0, 0, 0, 0);
 
     if (dateFilter === 'today') {
       data = data.filter(d => new Date(d.distributedAt) >= today);
@@ -40,6 +47,9 @@ export const ReportsPage = () => {
     if (personSearch) data = data.filter(d => d.workerName.toLowerCase().includes(personSearch.toLowerCase()));
     if (productSearch) data = data.filter(d => d.productName.toLowerCase().includes(productSearch.toLowerCase()));
 
+    // Filter out ghost data
+    data = data.filter(d => d.workerName && d.productName);
+
     return data.sort((a, b) => new Date(b.distributedAt).getTime() - new Date(a.distributedAt).getTime());
   }, [distributions, dateFilter, personSearch, productSearch]);
 
@@ -47,14 +57,16 @@ export const ReportsPage = () => {
     const ws = XLSX.utils.json_to_sheet(filteredData.map(d => ({
       'Date': new Date(d.distributedAt).toLocaleDateString(),
       'Time': new Date(d.distributedAt).toLocaleTimeString(),
-      'Worker Name': d.workerName,
-      'Product Name': d.productName,
+      'Worker': d.workerName,
+      'Product': d.productName,
       'Quantity': d.quantity,
-      'Distributed By': d.distributedBy
+      'Price': d.pricePerUnit || 0,
+      'Amount': d.totalAmount || 0,
+      'Admin': d.distributedBy
     })));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Distributions");
-    XLSX.writeFile(wb, `Audit_Report_${Date.now()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    XLSX.writeFile(wb, `Report_${Date.now()}.xlsx`);
   };
 
   const exportToPDF = async () => {
@@ -62,37 +74,39 @@ export const ReportsPage = () => {
       const doc = new jsPDF();
       const company = await dataService.getCompany();
       const companyName = company?.name || 'Your Company';
-      
+
       doc.setFontSize(22);
       doc.setTextColor(79, 70, 229);
       doc.text(companyName, 14, 20);
-      
+
       doc.setFontSize(14);
       doc.setTextColor(30, 41, 59);
       doc.text("Distribution Audit Log", 14, 30);
-      
+
       doc.setFontSize(10);
       doc.setTextColor(100, 116, 139);
       doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 38);
       doc.text(`Period: ${dateFilter.toUpperCase()}`, 14, 43);
-      
+
       const body = filteredData.map(d => [
         new Date(d.distributedAt).toLocaleString(),
         d.workerName,
         d.productName,
         d.quantity.toString(),
+        `₹${d.pricePerUnit || 0}`,
+        `₹${d.totalAmount || 0}`,
         d.distributedBy
       ]);
 
       autoTable(doc, {
         startY: 50,
-        head: [['Timestamp', 'Staff', 'Product', 'Qty', 'Admin']],
-        body,
+        head: [['Timestamp', 'Staff', 'Product', 'Qty', 'Price', 'Amount', 'Admin']],
+        body: body as any,
         theme: 'striped',
         headStyles: { fillColor: [79, 70, 229] },
         styles: { fontSize: 8 },
       });
-      
+
       doc.save(`Audit_${Date.now()}.pdf`);
     } catch (err) {
       console.error(err);
@@ -134,12 +148,12 @@ export const ReportsPage = () => {
             <option value="week">Past 7 Days</option>
             <option value="month">Current Month</option>
           </FilterSelect>
-          <FilterInput icon={<Package size={16}/>} label="Product" value={productSearch} onChange={setProductSearch} placeholder="Item..." />
-          <FilterInput icon={<Users size={16}/>} label="Staff" value={personSearch} onChange={setPersonSearch} placeholder="Name..." />
+          <FilterInput icon={<Package size={16} />} label="Product" value={productSearch} onChange={setProductSearch} placeholder="Item..." />
+          <FilterInput icon={<Users size={16} />} label="Staff" value={personSearch} onChange={setPersonSearch} placeholder="Name..." />
           <div className="flex items-end pb-1">
-             <button onClick={() => { setPersonSearch(''); setProductSearch(''); setDateFilter('all'); }} className="text-slate-400 font-black text-xs uppercase hover:text-rose-500 flex items-center gap-2">
-               <X size={14} /> Clear All
-             </button>
+            <button onClick={() => { setPersonSearch(''); setProductSearch(''); setDateFilter('all'); }} className="text-slate-400 font-black text-xs uppercase hover:text-rose-500 flex items-center gap-2">
+              <X size={14} /> Clear All
+            </button>
           </div>
         </div>
 
@@ -151,6 +165,8 @@ export const ReportsPage = () => {
                 <th className="px-8 py-6 text-[10px] font-black uppercase tracking-widest">Worker</th>
                 <th className="px-8 py-6 text-[10px] font-black uppercase tracking-widest">Item</th>
                 <th className="px-8 py-6 text-[10px] font-black uppercase tracking-widest">Qty</th>
+                <th className="px-8 py-6 text-[10px] font-black uppercase tracking-widest">Price</th>
+                <th className="px-8 py-6 text-[10px] font-black uppercase tracking-widest">Amount</th>
                 <th className="px-8 py-6 text-[10px] font-black uppercase tracking-widest">Admin</th>
               </tr>
             </thead>
@@ -161,6 +177,8 @@ export const ReportsPage = () => {
                   <td className="px-8 py-6 font-bold text-slate-700">{d.workerName}</td>
                   <td className="px-8 py-6 font-bold text-slate-800">{d.productName}</td>
                   <td className="px-8 py-6"><span className="px-3 py-1 bg-slate-100 rounded-full font-black text-xs">{d.quantity}</span></td>
+                  <td className="px-8 py-6 text-sm font-bold text-slate-500">₹{d.pricePerUnit || 0}</td>
+                  <td className="px-8 py-6 text-sm font-black text-emerald-600">₹{d.totalAmount || 0}</td>
                   <td className="px-8 py-6 font-black text-xs text-slate-400 uppercase">{d.distributedBy}</td>
                 </tr>
               ))}

@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, PieChart, Pie, BarChart, Bar
 } from 'recharts';
 import { dataService } from '../services/dataService';
@@ -21,7 +21,7 @@ export const AnalyticsPage = () => {
     };
     fetchDists();
   }, []);
-  
+
   const trendData = useMemo(() => {
     const map: Record<string, number> = {};
     dists.forEach(d => {
@@ -56,15 +56,30 @@ export const AnalyticsPage = () => {
       .slice(0, 8);
   }, [dists]);
 
+  const totalValue = useMemo(() => {
+    return dists.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
+  }, [dists]);
+
   return (
     <div className="space-y-8 pb-12">
-      <div className="flex items-center gap-6">
-        <div className="p-4 bg-slate-900 rounded-3xl text-white shadow-2xl">
-          <Zap size={32} />
+      <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+        <div className="flex items-center gap-6">
+          <div className="p-4 bg-slate-900 rounded-3xl text-white shadow-2xl">
+            <Zap size={32} />
+          </div>
+          <div>
+            <h2 className="text-3xl font-black text-slate-900">Visual Insights</h2>
+            <p className="text-slate-500 font-medium">Real-time performance metrics and distribution intelligence.</p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-3xl font-black text-slate-900">Visual Insights</h2>
-          <p className="text-slate-500 font-medium">Real-time performance metrics and distribution intelligence.</p>
+        <div className="bg-gradient-to-r from-emerald-500 to-teal-500 p-6 rounded-[2rem] text-white shadow-xl flex items-center gap-6 pr-10">
+          <div className="p-3 bg-white/20 rounded-2xl">
+            <TrendingUp size={24} className="text-white" />
+          </div>
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest opacity-80">Total Value Distributed</p>
+            <p className="text-3xl font-black">₹{totalValue.toLocaleString()}</p>
+          </div>
         </div>
       </div>
 
@@ -85,18 +100,18 @@ export const AnalyticsPage = () => {
                 <AreaChart data={trendData}>
                   <defs>
                     <linearGradient id="flowGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="5 5" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
+                  <XAxis
                     dataKey="date" axisLine={false} tickLine={false} dy={10}
-                    tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} 
+                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }}
                     tickFormatter={(s) => new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                   />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} />
-                  <Tooltip 
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }} />
+                  <Tooltip
                     contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', padding: '20px' }}
                   />
                   <Area type="monotone" dataKey="quantity" stroke="#6366f1" strokeWidth={5} fillOpacity={1} fill="url(#flowGrad)" />
@@ -140,7 +155,7 @@ export const AnalyticsPage = () => {
         {/* Worker Performance Bar Chart */}
         <div className="lg:col-span-12 bg-slate-900 p-10 rounded-[3rem] shadow-2xl overflow-hidden">
           <div className="flex items-center justify-between mb-12">
-             <div>
+            <div>
               <h3 className="text-2xl font-black text-white flex items-center gap-3">
                 <Award className="text-amber-400" size={32} /> Staff Consumption Lead
               </h3>
@@ -148,18 +163,18 @@ export const AnalyticsPage = () => {
             </div>
             <div className="hidden md:block text-[10px] font-black uppercase tracking-[0.3em] text-indigo-500/50">Leaderboard Analytics</div>
           </div>
-          
+
           <div className="h-96">
             {workerImpact.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={workerImpact} layout="vertical" margin={{ left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(255,255,255,0.05)" />
                   <XAxis type="number" hide />
-                  <YAxis 
-                    dataKey="name" type="category" axisLine={false} tickLine={false} 
-                    tick={{fill: '#94a3b8', fontSize: 12, fontWeight: 900}} 
+                  <YAxis
+                    dataKey="name" type="category" axisLine={false} tickLine={false}
+                    tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 900 }}
                   />
-                  <Tooltip cursor={{fill: 'rgba(255,255,255,0.02)'}} />
+                  <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
                   <Bar dataKey="value" radius={[0, 10, 10, 0]} barSize={30}>
                     {workerImpact.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
                   </Bar>

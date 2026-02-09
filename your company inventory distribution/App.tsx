@@ -9,6 +9,7 @@ import { StockEntryPage } from './pages/StockEntry';
 import { DistributionPage } from './pages/Distribution';
 import { ReportsPage } from './pages/Reports';
 import { AnalyticsPage } from './pages/Analytics';
+import { LandingPage } from './pages/Landing';
 import { dataService } from './services/dataService';
 import { User, Company } from './types';
 import { Loader2, ShieldCheck } from 'lucide-react';
@@ -52,12 +53,12 @@ const PrivateRoute = ({ children, roles }: { children?: React.ReactNode; roles?:
     );
   }
 
-  // If no company, we must go to setup
+  // If no company, we must go to landing
   if (!company) return <Navigate to="/" />;
-  
+
   // If no user but company exists, we must login
   if (!user) return <Navigate to="/login" />;
-  
+
   // Role check
   if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" />;
 
@@ -69,25 +70,26 @@ const App: React.FC = () => {
     <Router>
       <Routes>
         {/* Public Terminal Entrance */}
-        <Route path="/" element={<SetupPage />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/setup" element={<SetupPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
 
         {/* Protected Operational Routes */}
         <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-        
+
         <Route path="/stock" element={
           <PrivateRoute roles={['Admin', 'Manager']}>
             <StockEntryPage />
           </PrivateRoute>
         } />
-        
+
         <Route path="/distribution" element={
           <PrivateRoute roles={['Admin', 'Manager']}>
             <DistributionPage />
           </PrivateRoute>
         } />
-        
+
         <Route path="/reports" element={<PrivateRoute><ReportsPage /></PrivateRoute>} />
         <Route path="/analytics" element={<PrivateRoute><AnalyticsPage /></PrivateRoute>} />
 

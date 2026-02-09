@@ -1,19 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Building2, ArrowRight, Loader2 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 
 export const SetupPage = () => {
-  const [name, setName] = useState('');
+  const location = useLocation();
+  const [name, setName] = useState(location.state?.prefilledName || '');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
-    // If company already exists, skip setup
-    dataService.getCompany().then(company => {
-      if (company) navigate('/login');
-    });
+    // If company already exists, skip setup (unless we are explicitly creating a new one which is what this page is for now)
+    // The previous logic auto-redirected if ANY company existed. We want to avoid that if we are creating a NEW company.
+    // However, for now, let's just remove the auto-check because LandingPage handles the entry.
   }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,7 +40,7 @@ export const SetupPage = () => {
             <Building2 size={48} />
           </div>
         </div>
-        
+
         <div className="text-center mb-10">
           <h1 className="text-3xl font-black text-slate-900 mb-2">Enterprise Setup</h1>
           <p className="text-slate-500 font-medium">Define your organization identity to begin.</p>

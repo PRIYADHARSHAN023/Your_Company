@@ -11,18 +11,42 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// 🔥 LOGGING MIDDLEWARE (For Debugging 404/500)
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+
 // =======================
 // MONGODB CONNECTION
 // =======================
 
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
+  .then(async () => {
     console.log("✅ Connected to MongoDB Atlas");
     console.log("📂 DB Name:", mongoose.connection.name);
+
+    // 🔥 CLEANUP OLD INDEXES (Fixes Duplicate Key Error)
+    try {
+      const db = mongoose.connection.db;
+      const collections = await db.listCollections({ name: 'users' }).toArray();
+      if (collections.length > 0) {
+        const usersCol = db.collection('users');
+        const indexes = await usersCol.indexes();
+        if (indexes.some(i => i.name === 'userId_1')) {
+          await usersCol.dropIndex('userId_1');
+          console.log("🗑️ Dropped old global userId_1 index");
+        }
+      }
+    } catch (e) {
+      console.log("⚠️ Index cleanup skipped:", e.message);
+    }
   })
   .catch((err) => {
     console.error("❌ MongoDB Error:", err.message);
   });
+
 
 // =======================
 // SCHEMAS

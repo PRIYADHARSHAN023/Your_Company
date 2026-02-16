@@ -1,170 +1,290 @@
-
-import React, { useMemo, useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { Package, Truck, AlertTriangle, TrendingUp, Search, ChevronRight, Loader2 } from 'lucide-react';
+import React, { useMemo, useEffect, useState } from 'react';
+import {
+  Package,
+  Truck,
+  Users,
+  AlertCircle,
+  TrendingUp,
+  ArrowUpRight,
+  ArrowDownRight,
+  Activity,
+  Zap,
+  ShieldAlert,
+  Target,
+  ChevronRight,
+  TrendingDown,
+  PieChart
+} from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  PieChart as RePieChart,
+  Pie,
+  Cell
+} from 'recharts';
 import { dataService } from '../services/dataService';
-
-const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981'];
+import { Product, Distribution, Worker } from '../types';
 
 export const DashboardPage = () => {
-  const [activeMetric, setActiveMetric] = useState<'inventory' | 'dist' | 'stockout' | 'workers' | null>(null);
-  const [products, setProducts] = useState<any[]>([]);
-  const [dists, setDists] = useState<any[]>([]);
-  const [workers, setWorkers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [dists, setDists] = useState<Distribution[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const user = dataService.getCurrentUser();
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        const [p, d, w] = await Promise.all([
-          dataService.getProducts(),
-          dataService.getDistributions(),
-          dataService.getWorkers()
-        ]);
-        setProducts(p);
-        setDists(d);
-        setWorkers(w);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        // Minimal delay for smooth visual entry
-        setTimeout(() => setLoading(false), 500);
-      }
+      const [p, d, w] = await Promise.all([
+        dataService.getProducts(),
+        dataService.getDistributions(),
+        dataService.getWorkers()
+      ]);
+      setProducts(p);
+      setDists(d);
+      setWorkers(w);
     };
     fetchData();
   }, []);
 
   const stats = useMemo(() => {
-    const user = dataService.getCurrentUser();
-    const isWorker = user?.role === 'Worker';
-
-    // Global Stats
-    const outOfStock = products.filter(p => p.totalStock === 0);
-    const totalStock = products.length; // Workers can see total items
-
-    // User-Specific or Global Distribution Stats
-    // If worker, we only count THEIR distributions for the "Total Distributions" card
-    // BUT user said "leader board la yaaru irukka" -> Leaderboard needs GLOBAL data.
-    // So we need two sets of data:
-    // 1. globalDists (for leaderboard / top products)
-    // 2. myDists (for "My Stats" cards if we want to differentiate)
-
-    // User Requirement: "worker login ... avaru evlo products eduthurukkaru" (How much HE took)
-    // So distinct metrics:
+    if (!user) return null;
+    const isWorker = user.role === 'Worker';
     const myDists = isWorker ? dists.filter(d => d.workerName === user.name) : dists;
 
     const prodMap: Record<string, number> = {};
-    // Leaderboard needs GLOBAL data
     dists.forEach(d => { prodMap[d.productName] = (prodMap[d.productName] || 0) + d.quantity; });
     const topProducts = Object.entries(prodMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 5);
 
-    const workerMap: Record<string, number> = {};
-    dists.forEach(d => { workerMap[d.workerName] = (workerMap[d.workerName] || 0) + d.quantity; }); // Changed to quantity for better leaderboard
-    const workerStats = Object.entries(workerMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+    const outOfStock = products.filter(p => p.totalStock === 0);
+    const lowStock = products.filter(p => p.totalStock > 0 && p.totalStock <= 5);
+
+    const timelineMap: Record<string, number> = {};
+    myDists.forEach(d => {
+      const date = new Date(d.distributedAt).toLocaleDateString();
+      timelineMap[date] = (timelineMap[date] || 0) + d.quantity;
+    });
+    const timeline = Object.entries(timelineMap).map(([date, quantity]) => ({ date, quantity })).slice(-7);
 
     return {
+      totalProducts: products.length,
+      totalInventory: products.reduce((sum, p) => sum + p.totalStock, 0),
       outOfStock: outOfStock.length,
-      outOfStockList: outOfStock,
+      lowStock: lowStock.length,
+      totalDistributed: myDists.reduce((sum, d) => sum + d.quantity, 0),
+      totalWorkers: workers.length,
       topProducts,
-      workerStats,
-      totalProducts: totalStock,
-      totalDist: myDists.length, // Show MY total if worker
-      activeWorkers: workers.length,
-      isWorker
+      timeline,
+      outOfStockList: outOfStock,
+      lowStockList: lowStock
     };
-  }, [products, dists, workers]);
+  }, [products, dists, workers, user]);
 
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center py-40 gap-4">
-      <Loader2 className="animate-spin text-indigo-600" size={48} />
-      <p className="font-black text-slate-400 uppercase tracking-widest text-xs">Initializing Terminal...</p>
-    </div>
-  );
+  if (!stats) return null;
 
   return (
-    <div className="space-y-8 pb-12">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard icon={<Package className="text-indigo-600" />} label="Total Stock" value={stats.totalProducts} color="bg-indigo-50" active={activeMetric === 'inventory'} onClick={() => setActiveMetric(activeMetric === 'inventory' ? null : 'inventory')} />
-        <MetricCard icon={<Truck className="text-emerald-600" />} label={stats.isWorker ? "My Contributions" : "Total Distributions"} value={stats.totalDist} color="bg-emerald-50" active={activeMetric === 'dist'} onClick={() => setActiveMetric(activeMetric === 'dist' ? null : 'dist')} />
-        <MetricCard icon={<AlertTriangle className="text-rose-600" />} label="Critical Levels" value={stats.outOfStock} color="bg-rose-50" active={activeMetric === 'stockout'} onClick={() => setActiveMetric(activeMetric === 'stockout' ? null : 'stockout')} />
-        <MetricCard icon={<TrendingUp className="text-amber-600" />} label="Active Personnel" value={stats.activeWorkers} color="bg-amber-50" active={activeMetric === 'workers'} onClick={() => setActiveMetric(activeMetric === 'workers' ? null : 'workers')} />
+    <div className="space-y-10 pb-12">
+      {/* Hero Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <MetricCard
+          label="Total Inventory"
+          value={stats.totalInventory.toLocaleString()}
+          icon={<Package className="text-white" size={24} />}
+          trend="+12% from last node"
+          gradient="from-slate-900 to-slate-800"
+        />
+        <MetricCard
+          label="System Throughput"
+          value={stats.totalDistributed.toLocaleString()}
+          icon={<Zap className="text-white" size={24} />}
+          trend="+5.4% efficiency"
+          gradient="from-indigo-600 to-indigo-500"
+        />
+        <MetricCard
+          label="Active Personnel"
+          value={stats.totalWorkers.toString()}
+          icon={<Users className="text-white" size={24} />}
+          trend="Stationary overhead"
+          gradient="from-purple-600 to-purple-500"
+        />
+        <MetricCard
+          label="Critical Alerts"
+          value={(stats.outOfStock + stats.lowStock).toString()}
+          icon={<ShieldAlert className="text-white" size={24} />}
+          trend="Immediate attention"
+          gradient="from-rose-600 to-rose-500"
+          isAlert
+        />
       </div>
 
-      {activeMetric && (
-        <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-black text-slate-800 uppercase tracking-wider">Operational Data</h3>
-            <button onClick={() => setActiveMetric(null)} className="text-slate-400 font-bold hover:text-slate-900">Dismiss</button>
-          </div>
-          <div className="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50 sticky top-0">
-                <tr><th className="p-4 text-[10px] font-black uppercase text-slate-400">Name</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Value</th></tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {activeMetric === 'inventory' && products.map(p => <DetailRow key={p.id} n={p.productName} v={p.category} />)}
-                {activeMetric === 'stockout' && stats.outOfStockList.map(p => <DetailRow key={p.id} n={p.productName} v="0 PCS" red />)}
-                {activeMetric === 'dist' && dists.slice(-10).reverse().map(d => <DetailRow key={d.id} n={d.productName} v={`${d.quantity} PCS`} />)}
-                {activeMetric === 'workers' && workers.map(w => <DetailRow key={w.id} n={w.name} v={w.mobile || 'No Contact'} />)}
-              </tbody>
-            </table>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
+        {/* Main Chart Section */}
+        <div className="xl:col-span-2 space-y-10">
+          <ChartBox title="Operational Throughput" subtitle="Real-time distribution analytics (7-day window)" icon={<Activity className="text-indigo-500" size={20} />}>
+            <div className="h-[400px] w-full mt-8">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats.timeline}>
+                  <defs>
+                    <linearGradient id="colorQty" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', background: '#fff' }}
+                    itemStyle={{ fontWeight: 900, fontSize: '12px' }}
+                  />
+                  <Area type="monotone" dataKey="quantity" stroke="#6366f1" strokeWidth={4} fillOpacity={1} fill="url(#colorQty)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </ChartBox>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+            <ChartBox title="High Rank Assets" subtitle="Top performing distribution units" icon={<Target className="text-indigo-500" size={20} />}>
+              <div className="mt-8 space-y-4">
+                {stats.topProducts.map((p, i) => (
+                  <div key={p.name} className="flex items-center justify-between p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100 hover:bg-white transition-all hover:shadow-xl hover:shadow-slate-100 group">
+                    <div className="flex items-center gap-4 text-left">
+                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center font-black text-slate-400 border border-slate-100 group-hover:bg-slate-900 group-hover:text-white transition-all">
+                        {i + 1}
+                      </div>
+                      <span className="font-black text-sm text-slate-700">{p.name}</span>
+                    </div>
+                    <span className="font-black text-indigo-600 bg-indigo-50 px-4 py-1 rounded-full text-[10px] uppercase tracking-widest">{p.value} UNIT</span>
+                  </div>
+                ))}
+              </div>
+            </ChartBox>
+
+            <ChartBox title="Inventory Health" subtitle="Operational stock distribution" icon={<PieChart className="text-indigo-500" size={20} />}>
+              <div className="h-[250px] mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RePieChart>
+                    <Pie
+                      data={[
+                        { name: 'Healthy', value: stats.totalProducts - stats.outOfStock - stats.lowStock, color: '#10b981' },
+                        { name: 'Critical', value: stats.outOfStock, color: '#f43f5e' },
+                        { name: 'Low', value: stats.lowStock, color: '#f59e0b' }
+                      ]}
+                      cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={10} dataKey="value" stroke="none"
+                    >
+                      {(entry: any, index: number) => <Cell key={index} fill={entry.color} />}
+                    </Pie>
+                    <Tooltip />
+                  </RePieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex justify-center gap-6 mt-4">
+                <LegendItem color="bg-emerald-500" label="Healthy" />
+                <LegendItem color="bg-rose-500" label="Critical" />
+                <LegendItem color="bg-amber-500" label="Low" />
+              </div>
+            </ChartBox>
           </div>
         </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <ChartBox title="Distribution Trends" icon={<Package className="text-indigo-400" />}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={stats.topProducts}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
-              <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
-              <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={40}>
-                {stats.topProducts.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartBox>
+        {/* Operational Feed Sidebar */}
+        <div className="space-y-10">
+          <div className="p-8 bg-white/70 backdrop-blur-3xl border border-white rounded-[3rem] shadow-2xl">
+            <div className="flex items-center justify-between mb-8 text-left">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">Incident Feed</h3>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping" />
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Monitoring</span>
+                </div>
+              </div>
+            </div>
 
-        <ChartBox title="Personnel Activity" icon={<TrendingUp className="text-amber-400" />}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={stats.workerStats} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={8}>
-                {stats.workerStats.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartBox>
+            <div className="space-y-6 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
+              {stats.outOfStockList.map(p => (
+                <DetailRow key={p.id} item={p.productName} qty={0} label="OUT OF STOCK" color="rose" />
+              ))}
+              {stats.lowStockList.map(p => (
+                <DetailRow key={p.id} item={p.productName} qty={p.totalStock} label="LOW STOCK" color="amber" />
+              ))}
+              {stats.outOfStockList.length === 0 && stats.lowStockList.length === 0 && (
+                <div className="py-20 text-center space-y-4">
+                  <div className="mx-auto w-16 h-16 bg-emerald-50 text-emerald-500 rounded-3xl flex items-center justify-center border border-emerald-100 shadow-xl shadow-emerald-50">
+                    <Zap size={32} />
+                  </div>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest">System Nominal</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-const MetricCard = ({ icon, label, value, color, active, onClick }: any) => (
-  <div onClick={onClick} className={`p-8 rounded-[2rem] border transition-all cursor-pointer transform active:scale-95 ${active ? 'bg-slate-900 text-white border-slate-900 shadow-2xl' : 'bg-white border-slate-100 hover:border-indigo-200 shadow-sm'}`}>
-    <div className="flex items-start justify-between">
-      <div className={`p-5 rounded-2xl ${active ? 'bg-white/10' : color}`}>{icon}</div>
-      <div className={`text-3xl font-black ${active ? 'text-white' : 'text-slate-900'}`}>{value}</div>
+const MetricCard = ({ label, value, icon, trend, gradient, isAlert }: any) => (
+  <div className={`p-8 bg-gradient-to-br ${gradient} rounded-[2.5rem] shadow-2xl border border-white/10 relative overflow-hidden transform hover:-translate-y-1 transition-all duration-300 group`}>
+    <div className="absolute top-[-10%] right-[-10%] w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+    <div className="flex justify-between items-start relative z-10 mb-6">
+      <div className="p-4 bg-white/10 backdrop-blur-lg rounded-2xl border border-white/5">
+        {icon}
+      </div>
+      {isAlert && <div className="px-3 py-1 bg-white/10 rounded-full text-[10px] font-black uppercase tracking-tighter text-white animate-pulse">Critical</div>}
     </div>
-    <div className={`mt-6 text-[10px] font-black uppercase tracking-widest ${active ? 'text-slate-500' : 'text-slate-400'}`}>{label}</div>
+    <div className="relative z-10 space-y-2 text-left">
+      <h3 className="text-4xl font-black text-white tracking-tighter">{value}</h3>
+      <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.3em]">{label}</p>
+    </div>
+    <div className="mt-6 pt-6 border-t border-white/10 flex items-center gap-2 text-left relative z-10">
+      <span className="text-[10px] font-black text-white/80 uppercase tracking-widest">{trend}</span>
+    </div>
   </div>
 );
 
-const DetailRow = ({ n, v, red }: any) => (
-  <tr className="group hover:bg-slate-50/50 transition-colors">
-    <td className="p-4 font-bold text-slate-700">{n}</td>
-    <td className={`p-4 font-black text-sm ${red ? 'text-rose-500' : 'text-slate-400'}`}>{v}</td>
-  </tr>
+const ChartBox = ({ children, title, subtitle, icon }: any) => (
+  <div className="bg-white/70 backdrop-blur-3xl border border-white p-10 rounded-[3rem] shadow-2xl text-left">
+    <div className="flex items-start justify-between">
+      <div className="space-y-1">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-indigo-50 rounded-xl text-indigo-600 border border-indigo-100">
+            {icon}
+          </div>
+          <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{title}</h3>
+        </div>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-12">{subtitle}</p>
+      </div>
+      <button className="p-2 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all">
+        <ArrowUpRight size={20} />
+      </button>
+    </div>
+    {children}
+  </div>
 );
 
-const ChartBox = ({ title, children, icon }: any) => (
-  <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100">
-    <div className="flex items-center gap-3 mb-8">
-      {icon}
-      <h3 className="text-lg font-black text-slate-800 uppercase tracking-widest">{title}</h3>
+const LegendItem = ({ color, label }: any) => (
+  <div className="flex items-center gap-2">
+    <div className={`w-3 h-3 rounded-full ${color}`} />
+    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</span>
+  </div>
+);
+
+const DetailRow = ({ item, qty, label, color }: any) => (
+  <div className={`p-6 bg-white border border-slate-100 rounded-3xl flex items-center justify-between group hover:border-indigo-200 hover:shadow-2xl transition-all`}>
+    <div className="flex items-center gap-4 text-left">
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black ${color === 'rose' ? 'bg-rose-50 text-rose-500 border border-rose-100' : 'bg-amber-50 text-amber-500 border border-amber-100'}`}>
+        {qty}
+      </div>
+      <div>
+        <h4 className="font-black text-sm text-slate-800 tracking-tight">{item}</h4>
+        <span className={`text-[8px] font-black uppercase tracking-widest mt-1 block ${color === 'rose' ? 'text-rose-400' : 'text-amber-400'}`}>{label}</span>
+      </div>
     </div>
-    <div className="h-80">{children}</div>
+    <ChevronRight className="text-slate-200 group-hover:text-indigo-600 transition-colors" size={20} />
   </div>
 );

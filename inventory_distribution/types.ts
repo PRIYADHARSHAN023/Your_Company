@@ -20,9 +20,14 @@ export interface User {
 export interface Product {
   id: string;
   companyId: string;
-  productName: string;
-  category: string;
+  productName: string; // Item Desc
+  category: string;    // Product Group
+  itemCode: string;
+  itemDesc?: string;
+  stockType?: string;
   totalStock: number;
+  dealerPrice?: number;
+  totalValue?: number;
   updatedAt: string;
 }
 

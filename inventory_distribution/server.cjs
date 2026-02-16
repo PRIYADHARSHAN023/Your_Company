@@ -71,9 +71,14 @@ User.schema.index({ companyId: 1, userId: 1 }, { unique: true });
 
 const Product = mongoose.model("Product", new mongoose.Schema({
   companyId: mongoose.Schema.Types.ObjectId,
-  productName: String,
-  category: String,
+  productName: String, // Maps to Item Desc
+  category: String,     // Maps to Product (Group)
+  itemCode: String,
+  itemDesc: String,
+  stockType: String,
   totalStock: { type: Number, default: 0 },
+  dealerPrice: { type: Number, default: 0 },
+  totalValue: { type: Number, default: 0 },
   updatedAt: { type: Date, default: Date.now }
 }));
 
@@ -226,7 +231,12 @@ app.post("/api/products", authenticate, async (req, res) => {
       companyId: req.user.companyId,
       productName: req.body.productName,
       category: req.body.category,
-      totalStock: req.body.totalStock || 0
+      itemCode: req.body.itemCode,
+      itemDesc: req.body.itemDesc,
+      stockType: req.body.stockType,
+      totalStock: req.body.totalStock || 0,
+      dealerPrice: req.body.dealerPrice || 0,
+      totalValue: req.body.totalValue || 0
     });
 
     res.json(product);
